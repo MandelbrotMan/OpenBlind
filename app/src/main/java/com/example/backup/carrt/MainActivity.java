@@ -63,6 +63,7 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
     TextView result;
     ImageButton button;
     boolean activeState = false;
+
     /* state number meaning
     0= initial no specific operations performed
     1= state used for searching directions
@@ -70,6 +71,9 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
     3= state inside of reading results and waiting for reponse from user
      */
     int state = 0;
+
+    int listPosition = 0;
+
     protected GeoDataClient mGeoDataClient;
     protected PlaceDetectionClient mPlaceDetectionClient;
     URL searchURL;
@@ -171,7 +175,24 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
         if(mCurrentLocation == null){
             Log.v("current Location ", "not found");
         }
+        if(state == 3){
+            state = 4; //since we want the new state to be able to move onto the next
+            if(result.contains("read reviews")){
 
+            }else if(result.contains("next")){
+                if(listPosition < results.size()-2) {
+                    ++listPosition;
+                    readResults();
+                }
+
+            }else if(result.contains("directions")){
+
+            }else if(result.contains("call")){
+
+            }
+
+
+        }
         if(state == 2 && mCurrentLocation != null){
             MapsTasks myTask = new MapsTasks(result, "restaurants","" + mCurrentLocation.getLatitude(), "" + mCurrentLocation.getLongitude());
 
@@ -231,26 +252,28 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
             });
         }
     }
-    public void readResults(int i){
+    public void readResults(){
 
-            final int position = i;
-            if(state == 2) {
 
-                Speech.getInstance().say(i + " " + results.get(i).NAME, new TextToSpeechCallback() {
+            if(state == 3){
+                StartListening();
+            }
+            if(state == 4) {
+
+                Speech.getInstance().say( " " + results.get(listPosition).NAME, new TextToSpeechCallback() {
 
                     @Override
                     public void onStart() {
-                        Log.i("" + position, "speech started");
+                        Log.i("" + listPosition, "speech started");
                     }
 
                     @Override
                     public void onCompleted() {
-                        int max = 6;
-                        if (results.size() < 6) {
-                            max = results.size();
-                        }
-                        if (i < max - 2) {
-                            readResults(i + 1);
+
+                        if (listPosition < results.size()-2) {
+                            state = 3;
+                            readResults();
+
                         }
                     }
 
@@ -376,8 +399,8 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
         @Override
         protected void onPostExecute(String aVoid) {
             if(results.size() >0) {
-                state = 3;
-                readResults(0);
+                state = 2;
+                readResults();
             }
             Log.v("Post execute complete? ", "success or failure? ");
         }
