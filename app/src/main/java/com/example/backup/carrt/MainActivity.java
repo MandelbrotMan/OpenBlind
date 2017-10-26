@@ -63,6 +63,12 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
     TextView result;
     ImageButton button;
     boolean activeState = false;
+    /* state number meaning
+    0= initial no specific operations performed
+    1= state used for searching directions
+    2= start of reading results from google maps search
+    3= state inside of reading results and waiting for reponse from user
+     */
     int state = 0;
     protected GeoDataClient mGeoDataClient;
     protected PlaceDetectionClient mPlaceDetectionClient;
@@ -102,17 +108,17 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
 
           ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, MY_LOCATION_REQUEST_CODE );
       }else{
-          mCurrentLocation = (Location) mLocationManager.getLastKnownLocation(mLocationManager.NETWORK_PROVIDER);
+          mCurrentLocation =  mLocationManager.getLastKnownLocation(mLocationManager.NETWORK_PROVIDER);
           //handleGpsSearch("jimmy johns", "restaurants", "" + mCurrentLocation.getLatitude(), "" + mCurrentLocation.getLongitude());
 
 
+
       }
-
-
-
-
-
         Speech.init(this, getPackageName());
+
+
+
+
         progressView = (SpeechProgressView) this.findViewById(R.id.progress);
         result = (TextView) this.findViewById(R.id.result);
         button = (ImageButton) this.findViewById(R.id.button);
@@ -153,19 +159,21 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
     @Override
     public void onSpeechResult(String result)
     {
-        parseInstructions(result);
         this.result.setText(result);
+        parseInstructions(result);
+
 
 
 
     }
     public void parseInstructions(String result){
 
+        if(mCurrentLocation == null){
+            Log.v("current Location ", "not found");
+        }
 
-
-        if(state == 2){
+        if(state == 2 && mCurrentLocation != null){
             MapsTasks myTask = new MapsTasks(result, "restaurants","" + mCurrentLocation.getLatitude(), "" + mCurrentLocation.getLongitude());
-            Log.v("Log test 2", "completed");
 
             if (Build.VERSION.SDK_INT>= Build.VERSION_CODES.HONEYCOMB){
                 myTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
@@ -223,32 +231,36 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
             });
         }
     }
-    public void readResults(){
+    public void readResults(int i){
 
-        for(int i = 0; i < results.size(); ++i) {
-            //Speech.getInstance().shutdown();
-           // Speech.init(getBaseContext());
-            Log.v("Result ", ""+i);
             final int position = i;
+            if(state == 2) {
 
-            Speech.getInstance().say(i + " " +results.get(i).ADDRESS, new TextToSpeechCallback() {
+                Speech.getInstance().say(i + " " + results.get(i).NAME, new TextToSpeechCallback() {
 
-                @Override
-                public void onStart() {
-                    Log.i("" + position, "speech started");
-                }
+                    @Override
+                    public void onStart() {
+                        Log.i("" + position, "speech started");
+                    }
 
-                @Override
-                public void onCompleted() {
-                    Log.i("speech", "speech completed");
-                }
+                    @Override
+                    public void onCompleted() {
+                        int max = 6;
+                        if (results.size() < 6) {
+                            max = results.size();
+                        }
+                        if (i < max - 2) {
+                            readResults(i + 1);
+                        }
+                    }
 
-                @Override
-                public void onError() {
-                    Log.i("speech", "speech error");
-                }
-            });
-        }
+                    @Override
+                    public void onError() {
+                        Log.i("speech", "speech error");
+                    }
+                });
+            }
+
     }
     private void onRecordAudioPermissionGranted() {
         final Handler handler = new Handler();
@@ -296,9 +308,7 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
                     });
         }
     }
-    void logInfo(String info){
-        logger.setText(info);
-    }
+
 
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
@@ -340,10 +350,11 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
 
         @Override
         protected String doInBackground(String... urls) {
-            logInfo("do background ");
+
+
             if(isNetworkAvailable()){
                 try {
-                    getJsonData(buildSearchURL(Type, Key, Latitude, Longitude));
+                    getJsonData(buildSearchURL(Key, Latitude, Longitude));
                     Log.v("json data search called", " ");
                 } catch (IOException e) {
                     Log.v("IOException called", " ");
@@ -358,12 +369,17 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
 
         @Override
         protected void onPreExecute() {
+            Log.v("async task was created", " check do in background ");
             super.onPreExecute();
         }
 
         @Override
         protected void onPostExecute(String aVoid) {
-            readResults();
+            if(results.size() >0) {
+                state = 3;
+                readResults(0);
+            }
+            Log.v("Post execute complete? ", "success or failure? ");
         }
 
 
@@ -413,7 +429,8 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
             String latitude = currentGeoLoc.getString(get_LATITUDE);
             String longitude = currentGeoLoc.getString(get_LONGITUDE);
             results.add(new MapsObject(current.getString(get_NAME),
-                    current.getJSONObject(get_OPENING_HOURS).getString(get_OPEN),
+                 //   current.getJSONObject(get_OPENING_HOURS).getString(get_OPEN),
+                    "",
                     current.getString(get_TYPES),
                     current.getString(get_RATING),
                     current.getString(get_ADDRESS), latitude, longitude));
@@ -422,12 +439,11 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
         count = results.size();
         Log.v("Count = ", search_result.length()+"");
     }
-    public String buildSearchURL(String searchType, String keyWord, String lat, String lon) throws IOException {
+    public String buildSearchURL(String keyWord, String lat, String lon) throws IOException {
         //https://maps.googleapis.com/maps/api/place/textsearch/json?query=123+main+street&location=42.3675294,-71.186966&radius=10000&key=YOUR_API_KEY
         HttpURLConnection urlConnection = null;
         BufferedReader reader;
 
-        logInfo("get URL ");
         String locationfull = lat + "," + lon;
         Log.v("Location ", locationfull);
         String searchURLString = null;
