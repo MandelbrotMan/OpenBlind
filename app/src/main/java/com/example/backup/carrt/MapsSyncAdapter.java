@@ -122,11 +122,11 @@ public class MapsSyncAdapter extends AbstractThreadedSyncAdapter {
             JSONObject currentGeo = current.getJSONObject(get_GEOMETRY);
             String latitude = currentGeo.getString(get_LATITUDE);
             String longitude = currentGeo.getString(get_LONGITUDE);
-            results.add(new MapsObject(current.getString(get_NAME),
-                    current.getString(get_OPEN),
-                    current.getString(get_TYPES),
-                    current.getString(get_RATING),
-                    current.getString(get_ADDRESS), lat, lon));
+//            results.add(new MapsObject(current.getString(get_NAME),
+//                    current.getString(get_OPEN),
+//                    current.getString(get_TYPES),
+//                    current.getString(get_RATING),
+//                    current.getString(get_ADDRESS), lat, lon));
         }
         Log.v("Size of search: ", results.size()+"");
     }

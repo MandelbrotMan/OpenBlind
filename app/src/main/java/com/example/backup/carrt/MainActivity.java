@@ -1,7 +1,9 @@
 package com.example.backup.carrt;
 
+import android.app.ActivityManager;
 import android.app.Service;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.location.Location;
 import android.location.LocationManager;
@@ -12,8 +14,6 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Handler;
-import android.speech.tts.TextToSpeech;
-import android.speech.tts.TextToSpeechService;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
@@ -35,6 +35,7 @@ import net.gotev.speech.TextToSpeechCallback;
 import net.gotev.speech.ui.SpeechProgressView;
 
 import java.io.BufferedReader;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -44,14 +45,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 import android.Manifest;
-import android.widget.Button;
 import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import com.google.*;
-
-import android.os.Bundle;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -81,6 +78,7 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
     LocationManager mLocationManager;
     Location mCurrentLocation;
     public ArrayList<MapsObject> results = new ArrayList<>();
+    public ArrayList<ReviewObject> reviews_results = new ArrayList<>();
     TextView logger;
 
     int MY_LOCATION_REQUEST_CODE = 1;
@@ -118,6 +116,7 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
 
 
       }
+        getPermission();
         Speech.init(this, getPackageName());
 
 
@@ -141,7 +140,15 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
     }
     @Override
     public void onStartOfSpeech() {
-        Log.i("speech", "speech recognition is now active");
+        if(state == 6){
+            Log.v("voice was ", "initialized");
+            Uri gmmIntent = Uri.parse("google.navigation:q="+results.get(listPosition).ADDRESS+"&mode=w");
+            Intent mapIntent = new Intent(Intent.ACTION_VIEW, gmmIntent);
+            mapIntent.setPackage("com.google.android.apps.maps");
+            startActivity(mapIntent);
+            state = 1;
+
+        }
     }
 
     @Override
@@ -165,11 +172,8 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
     {
         this.result.setText(result);
         parseInstructions(result);
-
-
-
-
     }
+
     public void parseInstructions(String result){
 
         if(mCurrentLocation == null){
@@ -184,18 +188,20 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
                     ++listPosition;
                     readResults();
                 }
+            }else if(result.contains("directions") || result.contains("take me ") ){
+                state = 6;
+                StartListening();
 
-            }else if(result.contains("directions")){
+
+
 
             }else if(result.contains("call")){
 
             }
 
-
         }
         if(state == 2 && mCurrentLocation != null){
             MapsTasks myTask = new MapsTasks(result, "restaurants","" + mCurrentLocation.getLatitude(), "" + mCurrentLocation.getLongitude());
-
             if (Build.VERSION.SDK_INT>= Build.VERSION_CODES.HONEYCOMB){
                 myTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
             }else {
@@ -203,8 +209,7 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
             }
 
         }
-
-        if(result.contains("directions")){
+        if(result.contains("directions")&& state <2){
             state = 1;
 
             Speech.getInstance().say("where would you like to go", new TextToSpeechCallback() {
@@ -226,8 +231,6 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
 
                 }
             });
-
-
         }else if(result.contains("list") || result.contains("search for")){
 
             state = 2;
@@ -250,39 +253,57 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
                     Log.i("speech", "speech error");
                 }
             });
+        }else if(result.contains("terminate")){
+            closePrograms();
         }
     }
     public void readResults(){
 
-
-            if(state == 3){
-                StartListening();
-            }
-            if(state == 4) {
-
-                Speech.getInstance().say( " " + results.get(listPosition).NAME, new TextToSpeechCallback() {
-
-                    @Override
-                    public void onStart() {
-                        Log.i("" + listPosition, "speech started");
-                    }
-
-                    @Override
-                    public void onCompleted() {
-
-                        if (listPosition < results.size()-2) {
-                            state = 3;
-                            readResults();
-
+            switch (state) {
+                case 3:
+                    StartListening();
+                break;
+                case 4:
+                    Speech.getInstance().say(" " + results.get(listPosition).NAME, new TextToSpeechCallback() {
+                        @Override
+                        public void onStart() {
+                            Log.i("" + listPosition, "speech started");
                         }
-                    }
+                        @Override
+                        public void onCompleted() {
+                            if (listPosition < results.size() - 2) {
+                                state = 3;
+                                readResults();
 
-                    @Override
-                    public void onError() {
-                        Log.i("speech", "speech error");
-                    }
-                });
+                            }
+                        }
+                        @Override
+                        public void onError() {
+                            Log.i("speech", "speech error");
+                        }
+                    });
+                break;
+                case 5:
+                    Speech.getInstance().say("Sorry I did not find any results matching that name", new TextToSpeechCallback() {
+                        @Override
+                        public void onStart() {
+                            Log.i("" + listPosition, "speech started");
+                        }
+                        @Override
+                        public void onCompleted() {
+                            if (listPosition < results.size() - 2) {
+                                state = 3;
+                                readResults();
+                            }
+                        }
+                        @Override
+                        public void onError() {
+                            Log.i("speech", "speech error");
+                        }
+                    });
+
             }
+
 
     }
     private void onRecordAudioPermissionGranted() {
@@ -315,21 +336,16 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
         onRecordAudioPermissionGranted();
     }
     private void getPermission(){
-        if(Speech.getInstance().isListening()){
-            Speech.getInstance().stopListening();
-            Speech.getInstance().shutdown();
-            Speech.init(this, getPackageName());
-        }else {
+
             RxPermissions.getInstance(getBaseContext())
                     .request(Manifest.permission.RECORD_AUDIO)
                     .subscribe(granted -> {
                         if (granted) {
-                            onRecordAudioPermissionGranted();
+                            //onRecordAudioPermissionGranted();
                         } else {
                             Toast.makeText(MainActivity.this, R.string.app_name, Toast.LENGTH_LONG);
                         }
                     });
-        }
     }
 
 
@@ -377,7 +393,7 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
 
             if(isNetworkAvailable()){
                 try {
-                    getJsonData(buildSearchURL(Key, Latitude, Longitude));
+                    getJsonDataMapResults(buildSearchURL(Key, Latitude, Longitude));
                     Log.v("json data search called", " ");
                 } catch (IOException e) {
                     Log.v("IOException called", " ");
@@ -399,7 +415,11 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
         @Override
         protected void onPostExecute(String aVoid) {
             if(results.size() >0) {
-                state = 2;
+                state = 4;
+                listPosition = 0;
+                readResults();
+            }else{
+                state = 5;
                 readResults();
             }
             Log.v("Post execute complete? ", "success or failure? ");
@@ -413,6 +433,7 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
         }
 
         public void execute(String s, Object o, Object o1) {
+
         }
     }
 
@@ -422,7 +443,8 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
         NetworkInfo activeNetworkInfo = connectivityManager.getActiveNetworkInfo();
         return activeNetworkInfo != null && activeNetworkInfo.isConnected();
     }
-    public void getJsonData(String url) throws JSONException {
+
+    public void getJsonDataMapResults(String url) throws JSONException {
         //logInfo("getJSON");
         final String get_RESULTS = "results";
         final String get_NAME = "name";
@@ -435,6 +457,7 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
         final String get_LOCATION = "location";
         final String get_LATITUDE = "lat";
         final String get_LONGITUDE = "lng";
+        final String get_ID = "place_id";
 
         JSONObject object = new JSONObject(url);
         Log.v("Json object string: ",object.toString());
@@ -456,7 +479,8 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
                     "",
                     current.getString(get_TYPES),
                     current.getString(get_RATING),
-                    current.getString(get_ADDRESS), latitude, longitude));
+                    current.getString(get_ADDRESS), latitude, longitude,
+                    current.getString(get_ID)));
         }
 
         count = results.size();
@@ -517,6 +541,140 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
         }
         return searchURLString;
 
+    }
+    public String buildSearchURLReviews(String id) throws IOException {
+        //URL Example
+        //https://maps.googleapis.com/maps/api/place/details/json?placeid=ChIJGYLm53XswogRXIKW2OqzD6E&key=APIKEY
+        HttpURLConnection urlConnection = null;
+        BufferedReader reader;
+
+        String searchURLString = null;
+
+        Uri mapsURL = Uri.parse(base).buildUpon()
+                .appendPath("maps")
+                .appendPath("api")
+                .appendPath("place")
+                .appendPath("details")
+                .appendPath("json")
+                .appendQueryParameter("placeid", id)
+                .appendQueryParameter("key", "AIzaSyCEB1OEzUFhGesOQaTOfzXXAaM5A2yLgBM")
+                .build();
+        try{
+            URL searchURL = new URL(mapsURL.toString() + "&location=");
+
+            Log.v("URL", searchURL.toString());
+            urlConnection = (HttpURLConnection) searchURL.openConnection();
+            urlConnection.setRequestMethod("GET");
+            urlConnection.connect();
+            InputStream inputStream = urlConnection.getInputStream();
+            StringBuffer buffer = new StringBuffer();
+            if (inputStream == null) {
+                return null;
+            }
+            reader = new BufferedReader(new InputStreamReader(inputStream));
+
+            String line;
+            while ((line = reader.readLine()) != null) {
+
+                buffer.append(line + "\n");
+            }
+
+            if (buffer.length() == 0) {
+                return null;
+            }
+            searchURLString = buffer.toString();
+
+
+            return searchURLString;
+        }catch (IOException e){
+
+        }finally {
+            if(urlConnection!=null){
+                urlConnection.disconnect();
+
+            }
+        }
+        return searchURLString;
+
+    }
+    public String getPhoneNumber(String url) throws JSONException{
+        final String get_PHONE = "formatted_phone_number";
+        JSONObject object = new JSONObject(url);
+
+        return  object.getJSONObject(get_PHONE).toString();
+    }
+    public void createReviewsList(String url) throws JSONException {
+        //logInfo("getJSON");
+        final String get_REVIEWS = "reviews";
+        final String get_PHONE = "formatted_phone_number";
+        final String get_RATING = "rating"; //used twice once for getting the average and for each instance of a review
+        final String get_REVIEWER_NAME = "author_name";
+        final String get_REVIEWER_TEXT = "text";
+        final String get_REVIEWER_TIME = "relative_time_description";
+
+
+
+        JSONObject object = new JSONObject(url);
+        Log.v("Json object string: ",object.toString());
+        JSONArray search_reviews = object.getJSONArray(get_REVIEWS);
+
+        // logInfo(search_result.length()+ " ");
+        if(reviews_results.size()>0){
+            reviews_results.clear();
+        }
+
+        for (int i = 0; i < search_reviews.length(); ++i) {
+            JSONObject current = search_reviews.getJSONObject(i);
+            //String Author, String rating, String text, String date
+            reviews_results.add(new ReviewObject(current.getString(get_REVIEWER_NAME),
+                    current.getString(get_RATING),
+                    current.getString(get_REVIEWER_TEXT),
+                    current.getString(get_REVIEWER_TIME)));
+        }
+        
+
+    }
+    private void closePrograms(){
+        try
+        {
+            Process suProcess = Runtime.getRuntime().exec("su");
+            DataOutputStream os = new DataOutputStream(suProcess.getOutputStream());
+
+            os.writeBytes("adb shell" + "\n");
+            os.flush();
+
+            Context newContext=this;
+            ActivityManager activityManager = (ActivityManager) newContext.getSystemService( Context.ACTIVITY_SERVICE );
+            List<ActivityManager.RunningAppProcessInfo> appProcesses = activityManager.getRunningAppProcesses();
+            for(ActivityManager.RunningAppProcessInfo appProcess : appProcesses){
+                if(appProcess.processName.equals("com.yourPackageName")){
+                }
+                else{
+                    os.writeBytes("am force-stop "+appProcess.processName + "\n");
+                }
+            }
+
+            os.flush();
+            os.close();
+            suProcess.waitFor();
+
+        }
+
+        catch (IOException ex)
+        {
+            ex.getMessage();
+            Toast.makeText(getApplicationContext(), ex.getMessage(),Toast.LENGTH_LONG).show();
+        }
+        catch (SecurityException ex)
+        {
+            Toast.makeText(getApplicationContext(), "Can't get root access2",
+                    Toast.LENGTH_LONG).show();
+        }
+        catch (Exception ex)
+        {
+            Toast.makeText(getApplicationContext(), "Can't get root access3",
+                    Toast.LENGTH_LONG).show();
+        }
     }
 
 

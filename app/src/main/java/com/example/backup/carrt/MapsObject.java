@@ -14,11 +14,11 @@ public class MapsObject {
     public String ADDRESS = "formatted_address";
     public String LATITUDE;
     public String LONGTITUDE;
+    public String PLACE_ID;
+    public String PHONE_NUMBER;
 
-    public MapsObject(){
 
-    }
-    public MapsObject(String name, String Open, String Types, String Rating, String Address, String lat, String lon){
+    public MapsObject(String name, String Open, String Types, String Rating, String Address, String lat, String lon, String placeId){
         NAME = name;
         OPEN = Open;
         TYPES = Types;
@@ -26,6 +26,8 @@ public class MapsObject {
         ADDRESS = Address;
         LATITUDE = lat;
         LONGTITUDE = lon;
+        PLACE_ID = placeId;
+        PHONE_NUMBER = "";
 
     }
 }
