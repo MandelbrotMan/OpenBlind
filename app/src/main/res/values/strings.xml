@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">CARRT</string>
     <string name="content_authority">com.example.backup.carrt</string>
+    <string name="mapzen_api_key">mapzen-2Dw9tMk</string>
 </resources>

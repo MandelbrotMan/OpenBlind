@@ -25,6 +25,12 @@ import com.google.android.gms.location.LocationListener;
 import com.google.android.gms.location.places.GeoDataClient;
 import com.google.android.gms.location.places.PlaceDetectionClient;
 import com.google.android.gms.location.places.Places;
+import com.mapzen.android.routing.MapzenRouter;
+import com.mapzen.helpers.RouteEngine;
+import com.mapzen.helpers.RouteListener;
+import com.mapzen.model.ValhallaLocation;
+import com.mapzen.valhalla.Route;
+import com.mapzen.valhalla.RouteCallback;
 import com.tbruyelle.rxpermissions.RxPermissions;
 
 import net.gotev.speech.GoogleVoiceTypingDisabledException;
@@ -80,10 +86,12 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
     public ArrayList<MapsObject> results = new ArrayList<>();
     public ArrayList<ReviewObject> reviews_results = new ArrayList<>();
     TextView logger;
-
+    MapzenRouter router;
     int MY_LOCATION_REQUEST_CODE = 1;
     int count = 0;
     String logText = "start";
+    RouteEngine engine;
+    Route currentRoute;
 
 
     @Override
@@ -91,7 +99,16 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        router = new MapzenRouter(this);
+        router.setCallback(new RouteCallback() {
+            @Override public void success(Route route) {
+                currentRoute = route;
+            }
 
+            @Override public void failure(int i) {
+                //Handle failure
+            }
+        });
         mGeoDataClient = Places.getGeoDataClient(this, null);
 
         mPlaceDetectionClient = Places.getPlaceDetectionClient(this, null);
@@ -99,26 +116,10 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
 
         mLocationManager = (LocationManager) getSystemService(Service.LOCATION_SERVICE);
         logger = findViewById(R.id.log);
-      if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-          // TODO: Consider calling
-          //    ActivityCompat#requestPermissions
-          // here to request the missing permissions, and then overriding
-          //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-          //                                          int[] grantResults)
-          // to handle the case where the user grants the permission. See the documentation
-          // for ActivityCompat#requestPermissions for more details.
 
-          ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, MY_LOCATION_REQUEST_CODE );
-      }else{
-          mCurrentLocation =  mLocationManager.getLastKnownLocation(mLocationManager.NETWORK_PROVIDER);
-          //handleGpsSearch("jimmy johns", "restaurants", "" + mCurrentLocation.getLatitude(), "" + mCurrentLocation.getLongitude());
-
-
-
-      }
         getPermission();
         Speech.init(this, getPackageName());
-
+        getCurrentLocation();
 
 
 
@@ -141,13 +142,7 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
     @Override
     public void onStartOfSpeech() {
         if(state == 6){
-            Log.v("voice was ", "initialized");
-            Uri gmmIntent = Uri.parse("google.navigation:q="+results.get(listPosition).ADDRESS+"&mode=w");
-            Intent mapIntent = new Intent(Intent.ACTION_VIEW, gmmIntent);
-            mapIntent.setPackage("com.google.android.apps.maps");
-            startActivity(mapIntent);
-            state = 1;
-
+              state = 1;
         }
     }
 
@@ -164,12 +159,13 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
             str.append(res).append(" ");
         }
 
-       // Log.i("speech", "partial result: " + str.toString().trim());
+        Log.i("speech", "partial result: " + str.toString().trim());
     }
 
     @Override
     public void onSpeechResult(String result)
     {
+        Log.v("result speech", result);
         this.result.setText(result);
         parseInstructions(result);
     }
@@ -190,9 +186,8 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
                 }
             }else if(result.contains("directions") || result.contains("take me ") ){
                 state = 6;
-                StartListening();
-
-
+                beginRouting();
+                //StartListening();
 
 
             }else if(result.contains("call")){
@@ -201,7 +196,8 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
 
         }
         if(state == 2 && mCurrentLocation != null){
-            MapsTasks myTask = new MapsTasks(result, "restaurants","" + mCurrentLocation.getLatitude(), "" + mCurrentLocation.getLongitude());
+
+            MapsTasks myTask = new MapsTasks(result,"" + mCurrentLocation.getLatitude(), "" + mCurrentLocation.getLongitude());
             if (Build.VERSION.SDK_INT>= Build.VERSION_CODES.HONEYCOMB){
                 myTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
             }else {
@@ -209,52 +205,18 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
             }
 
         }
+
         if(result.contains("directions")&& state <2){
             state = 1;
-
-            Speech.getInstance().say("where would you like to go", new TextToSpeechCallback() {
-
-                @Override
-                public void onStart() {
-                    Log.i("directions", "speech started");
-                }
-
-                @Override
-                public void onCompleted() {
-                    Log.i("speech", "speech completed");
-                    StartListening();
-                }
-
-                @Override
-                public void onError() {
-                    Log.i("speech", "speech error");
-
-                }
-            });
+            speak("where would you like to go");
         }else if(result.contains("list") || result.contains("search for")){
-
+            speak("What would you like to search for ");
             state = 2;
+            StartListening();
 
-            Speech.getInstance().say("what would you like to search ", new TextToSpeechCallback() {
 
-                @Override
-                public void onStart() {
-                    Log.i("list search", "speech started");
-                }
-
-                @Override
-                public void onCompleted() {
-                    Log.i("speech", "speech completed");
-                   StartListening();
-                }
-
-                @Override
-                public void onError() {
-                    Log.i("speech", "speech error");
-                }
-            });
         }else if(result.contains("terminate")){
-            closePrograms();
+
         }
     }
     public void readResults(){
@@ -264,43 +226,10 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
                     StartListening();
                 break;
                 case 4:
-                    Speech.getInstance().say(" " + results.get(listPosition).NAME, new TextToSpeechCallback() {
-                        @Override
-                        public void onStart() {
-                            Log.i("" + listPosition, "speech started");
-                        }
-                        @Override
-                        public void onCompleted() {
-                            if (listPosition < results.size() - 2) {
-                                state = 3;
-                                readResults();
-
-                            }
-                        }
-                        @Override
-                        public void onError() {
-                            Log.i("speech", "speech error");
-                        }
-                    });
+                    speak(results.get(listPosition).NAME);
                 break;
                 case 5:
-                    Speech.getInstance().say("Sorry I did not find any results matching that name", new TextToSpeechCallback() {
-                        @Override
-                        public void onStart() {
-                            Log.i("" + listPosition, "speech started");
-                        }
-                        @Override
-                        public void onCompleted() {
-                            if (listPosition < results.size() - 2) {
-                                state = 3;
-                                readResults();
-                            }
-                        }
-                        @Override
-                        public void onError() {
-                            Log.i("speech", "speech error");
-                        }
-                    });
+                   speak("Sorry I did not find any results matching that name");
 
             }
 
@@ -376,15 +305,14 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
 
     private class MapsTasks extends AsyncTask<String, Void, String>{
         String Key;
-        String Type;
         String Latitude;
         String Longitude;
 
-        public MapsTasks(String keyword, String searchType, String lat, String lon) {
+        public MapsTasks(String keyword, String lat, String lon) {
             Key = keyword;
-            Type = searchType;
             Latitude = lat;
             Longitude = lon;
+
         }
 
         @Override
@@ -393,6 +321,7 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
 
             if(isNetworkAvailable()){
                 try {
+                    Log.v("gKeyword ", Key);
                     getJsonDataMapResults(buildSearchURL(Key, Latitude, Longitude));
                     Log.v("json data search called", " ");
                 } catch (IOException e) {
@@ -408,7 +337,7 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
 
         @Override
         protected void onPreExecute() {
-            Log.v("async task was created", " check do in background ");
+            Log.v("async task was created", Key);
             super.onPreExecute();
         }
 
@@ -486,13 +415,13 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
         count = results.size();
         Log.v("Count = ", search_result.length()+"");
     }
-    public String buildSearchURL(String keyWord, String lat, String lon) throws IOException {
+    public String buildSearchURL(String searchTerm, String lat, String lon) throws IOException {
         //https://maps.googleapis.com/maps/api/place/textsearch/json?query=123+main+street&location=42.3675294,-71.186966&radius=10000&key=YOUR_API_KEY
         HttpURLConnection urlConnection = null;
         BufferedReader reader;
 
         String locationfull = lat + "," + lon;
-        Log.v("Location ", locationfull);
+        Log.v("Location ", searchTerm);
         String searchURLString = null;
 
         Uri mapsURL = Uri.parse(base).buildUpon()
@@ -500,12 +429,11 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
                 .appendPath("api")
                 .appendPath("place")
                 .appendPath("textsearch")
-                .appendQueryParameter("query",  keyWord)
                 .appendQueryParameter("radius", "500")
                 .appendQueryParameter("key", "AIzaSyCEB1OEzUFhGesOQaTOfzXXAaM5A2yLgBM")
                 .appendPath("json").build();
         try{
-            URL searchURL = new URL(mapsURL.toString() + "&location="+locationfull);
+            URL searchURL = new URL(mapsURL.toString() + "&location="+locationfull + "&query="+searchTerm);
 
             Log.v("URL", searchURL.toString());
             urlConnection = (HttpURLConnection) searchURL.openConnection();
@@ -634,48 +562,100 @@ public class MainActivity extends AppCompatActivity implements SpeechDelegate {
         
 
     }
-    private void closePrograms(){
-        try
-        {
-            Process suProcess = Runtime.getRuntime().exec("su");
-            DataOutputStream os = new DataOutputStream(suProcess.getOutputStream());
+    public void getCurrentLocation (){
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            // TODO: Consider calling
+            //    ActivityCompat#requestPermissions
+            // here to request the missing permissions, and then overriding
+            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
+            //                                          int[] grantResults)
+            // to handle the case where the user grants the permission. See the documentation
+            // for ActivityCompat#requestPermissions for more details.
 
-            os.writeBytes("adb shell" + "\n");
-            os.flush();
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, MY_LOCATION_REQUEST_CODE );
+        }else{
+            mCurrentLocation =  mLocationManager.getLastKnownLocation(mLocationManager.NETWORK_PROVIDER);
 
-            Context newContext=this;
-            ActivityManager activityManager = (ActivityManager) newContext.getSystemService( Context.ACTIVITY_SERVICE );
-            List<ActivityManager.RunningAppProcessInfo> appProcesses = activityManager.getRunningAppProcesses();
-            for(ActivityManager.RunningAppProcessInfo appProcess : appProcesses){
-                if(appProcess.processName.equals("com.yourPackageName")){
-                }
-                else{
-                    os.writeBytes("am force-stop "+appProcess.processName + "\n");
-                }
-            }
-
-            os.flush();
-            os.close();
-            suProcess.waitFor();
-
-        }
-
-        catch (IOException ex)
-        {
-            ex.getMessage();
-            Toast.makeText(getApplicationContext(), ex.getMessage(),Toast.LENGTH_LONG).show();
-        }
-        catch (SecurityException ex)
-        {
-            Toast.makeText(getApplicationContext(), "Can't get root access2",
-                    Toast.LENGTH_LONG).show();
-        }
-        catch (Exception ex)
-        {
-            Toast.makeText(getApplicationContext(), "Can't get root access3",
-                    Toast.LENGTH_LONG).show();
         }
     }
+    public void speak(String statement){
+        Speech.getInstance().say( statement, new TextToSpeechCallback() {
+
+            @Override
+            public void onStart() {
+                Log.i("list search", "speech started");
+            }
+
+            @Override
+            public void onCompleted() {
+                Log.i("speech", "speech completed");
+                StartListening();
+            }
+
+            @Override
+            public void onError() {
+                Log.i("speech", "speech error");
+            }
+        });
+    }
+    public void beginRouting(){
+        router.setWalking();
+
+        double[] startPoint = {mCurrentLocation.getLatitude(), mCurrentLocation.getLongitude()};
+        router.setLocation(startPoint);
+
+        double[] endPoint = {Double.parseDouble(results.get(listPosition).LATITUDE), Double.parseDouble(results.get(listPosition).LONGTITUDE)};
+        router.setLocation(endPoint);
+        router.fetch();
+        engine = new RouteEngine();
+        RouteListener routeListener = new RouteListener() {
+            @Override public void onRouteStart() {
+                //Show UI to indicate route started
+            }
+
+            @Override public void onRecalculate(ValhallaLocation location) {
+                //Fetch new route
+            }
+
+            @Override public void onSnapLocation(ValhallaLocation originalLocation,
+                                                 ValhallaLocation snapLocation) {
+                //Center map on snapLocation
+            }
+
+            @Override public void onMilestoneReached(int index, RouteEngine.Milestone milestone) {
+
+                speak(currentRoute.getRouteInstructions().get(index).getVerbalTransitionAlertInstruction());
+                //Speak alert instruction
+            }
+
+            @Override public void onApproachInstruction(int index) {
+                speak(currentRoute.getRouteInstructions().get(index).getVerbalPreTransitionInstruction());
+                //Speak pre transition instruction
+            }
+
+            @Override public void onInstructionComplete(int index) {
+                speak(currentRoute.getRouteInstructions().get(index).getVerbalPostTransitionInstruction());
+                //Speak post transition instruction
+            }
+
+            @Override
+            public void onUpdateDistance(int distanceToNextInstruction, int distanceToDestination) {
+                //Update trip summary UI to reflect distance away from destination
+            }
+
+            @Override public void onRouteComplete() {
+                //Show 'you have arrived' UI
+            }
+        };
+//            Log.v("voice was ", "initialized");
+//            Uri gmmIntent = Uri.parse("google.navigation:q="+results.get(listPosition).ADDRESS+"&mode=w");
+//            Intent mapIntent = new Intent(Intent.ACTION_VIEW, gmmIntent);
+//            mapIntent.setPackage("com.google.android.apps.maps");
+//            startActivity(mapIntent);
+        engine.setListener(routeListener);
+        engine.setRoute(currentRoute);
+    }
+
 
 
 
